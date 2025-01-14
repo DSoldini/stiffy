@@ -1,47 +1,64 @@
 from flask import Flask, request, jsonify
 from pymongo import MongoClient
+import random
 
 app = Flask(__name__)
 
 client = MongoClient("mongodb://localhost:27017/")
 db = client["stiffy"]  
-members_collection = db["members"]  
+users_collection = db["members"]  
 
-@app.route("/members", methods=["GET"])
-def get_all_members():
-   
-    members = list(members_collection.find({}, {"_id": 0}))  
-    return jsonify(members)
+def generate_account_id():
+    return random.randint(1000, 9999)  
 
-@app.route("/members", methods=["POST"])
-def add_member():
+@app.route("/register/manager", methods=["POST"])
+def register_manager():
     data = request.get_json()
-    if "name" in data and "email" in data and "points" in data:
-        members_collection.insert_one(data)
-        return jsonify({"message": "Member added successfully!"}), 201
-    return jsonify({"error": "Missing required fields"}), 400
+    if "name" not in data or "email" not in data or "passcode" not in data:
+        return jsonify({"error": "Missing required fields"}), 400
 
-@app.route("/members/<string:name>", methods=["GET"])
-def get_member(name):
-    member = members_collection.find_one({"name": name}, {"_id": 0})
-    if member:
-        return jsonify(member)
-    return jsonify({"error": "Member not found"}), 404
+    account_id = generate_account_id()
 
-@app.route("/members/<string:name>", methods=["PUT"])
-def update_member(name):
+    manager = {
+        "name": data["name"],
+        "email": data["email"],
+        "role": "manager",
+        "account_id": account_id,
+        "passcode": data["passcode"]
+    }
+    users_collection.insert_one(manager)
+
+    return jsonify({"message": "Manager account created successfully", "account_id": account_id}), 201
+
+@app.route("/register/salesperson", methods=["POST"])
+def register_salesperson():
+
     data = request.get_json()
-    update_result = members_collection.update_one({"name": name}, {"$set": data})
-    if update_result.matched_count > 0:
-        return jsonify({"message": "Member updated successfully!"})
-    return jsonify({"error": "Member not found"}), 404
+    if "name" not in data or "email" not in data or "passcode" not in data:
+        return jsonify({"error": "Missing required fields"}), 400
 
-@app.route("/members/<string:name>", methods=["DELETE"])
-def delete_member(name):
-    delete_result = members_collection.delete_one({"name": name})
-    if delete_result.deleted_count > 0:
-        return jsonify({"message": "Member deleted successfully!"})
-    return jsonify({"error": "Member not found"}), 404
+    manager = users_collection.find_one({"passcode": data["passcode"], "role": "manager"})
+    if not manager:
+        return jsonify({"error": "Invalid passcode"}), 400
+
+    salesperson = {
+        "name": data["name"],
+        "email": data["email"],
+        "role": "salesperson",
+        "account_id": manager["account_id"]
+    }
+    users_collection.insert_one(salesperson)
+
+    return jsonify({"message": "Salesperson account created successfully", "account_id": manager["account_id"]}), 201
+
+
+@app.route("/users/<int:account_id>", methods=["GET"])
+def get_users_by_account_id(account_id):
+    users = list(users_collection.find({"account_id": account_id}, {"_id": 0, "passcode": 0}))
+    if not users:
+        return jsonify({"error": "No users found for this account_id"}), 404
+
+    return jsonify(users)
 
 if __name__ == "__main__":
     app.run(debug=True)
